@@ -6,7 +6,7 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
-use cross_krb5::{AcceptFlags, PendingServerCtx, ServerCtx};
+use cross_krb5::{AcceptFlags, K5ServerCtx, PendingServerCtx, ServerCtx};
 use futures_util::future::BoxFuture;
 use std::{
     fmt::Debug,
@@ -15,14 +15,16 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
+use winauth::windows::{NtlmSspi, NtlmSspiBuilder};
 
 mod kerberos;
+mod ntlm;
 
 #[derive(Default)]
 enum NegotiateState {
     #[default]
     Unauthorized,
-    Pending(ServerContext),
+    Pending(PendingServerContext),
     Authorized,
 }
 impl Debug for NegotiateState {
@@ -35,20 +37,48 @@ impl Debug for NegotiateState {
     }
 }
 
-struct NtlmContext;
-
-enum ServerContext {
+enum PendingServerContext {
     Kerberos(PendingServerCtx),
-    Ntlm(NtlmContext),
+    Ntlm(NtlmSspi),
 }
-impl ServerContext {
+impl PendingServerContext {
     fn new_kerberos(spn: &str) -> Result<Self, String> {
-        Ok(ServerContext::Kerberos(
+        Ok(PendingServerContext::Kerberos(
             ServerCtx::new(AcceptFlags::NEGOTIATE_TOKEN, Some(spn)).map_err(|x| x.to_string())?,
         ))
     }
-    fn new_ntlm(_spn: &str) -> Result<Self, String> {
-        todo!()
+    fn new_ntlm(spn: &str) -> Result<Self, String> {
+        Ok(PendingServerContext::Ntlm(
+            NtlmSspiBuilder::new()
+                .inbound()
+                .target_spn(spn)
+                .build()
+                .map_err(|x| x.to_string())?,
+        ))
+    }
+}
+
+#[derive(Clone)]
+pub struct Authenticated(Option<String>);
+impl Authenticated {
+    fn from_finished_context(f: &mut FinishedServerContext) -> Self {
+        let client = f.client();
+        Self(client)
+    }
+    pub fn client(&self) -> Option<&str> {
+        self.0.as_deref()
+    }
+}
+enum FinishedServerContext {
+    Kerberos(ServerCtx),
+    Ntlm(NtlmSspi),
+}
+impl FinishedServerContext {
+    fn client(&mut self) -> Option<String> {
+        match self {
+            Self::Kerberos(k) => k.client().ok(),
+            Self::Ntlm(n) => n.client_identity().ok(),
+        }
     }
 }
 
@@ -106,7 +136,7 @@ where
         self.inner.poll_ready(cx)
     }
     fn call(&mut self, req: Request) -> Self::Future {
-        let (parts, body) = req.into_parts();
+        let (mut parts, body) = req.into_parts();
         let ConnectInfo(connection) = match parts.extensions.get::<ConnectInfo<NegotiateInfo>>().cloned() {
             Some(negotiate_info) => negotiate_info,
             None => return Box::pin(async { Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response()) }),
@@ -124,17 +154,24 @@ where
         let Ok(context) = (match std::mem::replace(lock.deref_mut(), NegotiateState::Unauthorized) {
             NegotiateState::Authorized => unreachable!(),
             NegotiateState::Pending(context) => Ok(context),
-            NegotiateState::Unauthorized if is_ntlm(token) => ServerContext::new_ntlm(&self.spn),
-            NegotiateState::Unauthorized => ServerContext::new_kerberos(&self.spn),
+            NegotiateState::Unauthorized if is_ntlm(token) => PendingServerContext::new_ntlm(&self.spn),
+            NegotiateState::Unauthorized => PendingServerContext::new_kerberos(&self.spn),
         }) else {
             return Box::pin(async { Ok(failed_to_create_context()) });
         };
         let step_result = match context {
-            ServerContext::Ntlm(NtlmContext) => unimplemented!(),
-            ServerContext::Kerberos(kerberos) => kerberos::handle_kerberos(kerberos, token),
+            PendingServerContext::Ntlm(ntlm) => {
+                eprintln!("Using NTLM!");
+                ntlm::handle_ntlm(ntlm, token)
+            }
+            PendingServerContext::Kerberos(kerberos) => {
+                eprintln!("Using NTLM!");
+                kerberos::handle_kerberos(kerberos, token)
+            }
         };
         match step_result {
-            StepResult::Finished => {
+            StepResult::Finished(mut f) => {
+                parts.extensions.insert(Authenticated::from_finished_context(&mut f));
                 let request = Request::from_parts(parts, body);
                 let next_future = self.inner.call(request);
                 *lock = NegotiateState::Authorized;
@@ -153,8 +190,8 @@ where
 }
 
 enum StepResult {
-    Finished,
-    ContinueWith(ServerContext, Response),
+    Finished(FinishedServerContext),
+    ContinueWith(PendingServerContext, Response),
     Error(Response),
 }
 

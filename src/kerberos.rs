@@ -1,4 +1,4 @@
-use crate::{unauthorized, StepResult};
+use crate::{unauthorized, FinishedServerContext, StepResult};
 use axum::{
     http::{
         header::{CONNECTION, WWW_AUTHENTICATE},
@@ -22,9 +22,9 @@ pub fn handle_kerberos(context: PendingServerCtx, token: &str) -> StepResult {
             header_map.insert(WWW_AUTHENTICATE, hv);
             header_map.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
             let response = (StatusCode::UNAUTHORIZED, header_map, "").into_response();
-            StepResult::ContinueWith(crate::ServerContext::Kerberos(ctx), response)
+            StepResult::ContinueWith(crate::PendingServerContext::Kerberos(ctx), response)
         }
-        Ok(Step::Finished((_ctx, _e))) => StepResult::Finished,
+        Ok(Step::Finished((ctx, _e))) => StepResult::Finished(FinishedServerContext::Kerberos(ctx)),
         Err(_e) => StepResult::Error(unauthorized("authorization failed")),
     }
 }
