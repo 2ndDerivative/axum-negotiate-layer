@@ -161,14 +161,8 @@ where
             return Box::pin(async { Ok(failed_to_create_context()) });
         };
         let step_result = match context {
-            PendingServerContext::Ntlm(ntlm) => {
-                eprintln!("Using NTLM!");
-                ntlm::handle_ntlm(ntlm, token)
-            }
-            PendingServerContext::Kerberos(kerberos) => {
-                eprintln!("Using Kerberos!");
-                kerberos::handle_kerberos(kerberos, token)
-            }
+            PendingServerContext::Ntlm(ntlm) => ntlm::handle_ntlm(ntlm, token),
+            PendingServerContext::Kerberos(kerberos) => kerberos::handle_kerberos(kerberos, token),
         };
         match step_result {
             StepResult::Finished(mut f) => {
