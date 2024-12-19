@@ -58,6 +58,7 @@ impl PendingServerContext {
     }
 }
 
+/// [`Extension`](axum::Extension) type that gets set after successful Authentication
 #[derive(Debug, Clone)]
 pub struct Authenticated(Option<String>);
 impl Authenticated {
@@ -82,6 +83,9 @@ impl FinishedServerContext {
     }
 }
 
+/// Type that must be set via [`Router::into_make_service_with_connect_info`](axum::Router::into_make_service_with_connect_info).
+///
+/// Without this, the [`NegotiateLayer`] will not work
 #[derive(Clone, Debug, Default)]
 pub struct NegotiateInfo {
     auth: Arc<Mutex<NegotiateState>>,
@@ -97,6 +101,11 @@ impl<T> Connected<T> for NegotiateInfo {
     }
 }
 
+/// [`Layer`](tower::Layer) which will enforce authentication
+///
+/// The SPN must be correctly installed in the local realm
+///
+/// Also a [`ConnectInfo`](axum::extract::ConnectInfo) extension must have been set on the router.
 #[derive(Clone)]
 pub struct NegotiateLayer {
     spn: String,
@@ -114,6 +123,11 @@ impl<S> Layer<S> for NegotiateLayer {
     }
 }
 #[derive(Clone)]
+/// Middleware to enforce authentication
+///
+/// A layer may be made from this via [`NegotiateLayer::new`]
+///
+/// This middleware will not work without the [`NegotiateInfo`] [`ConnectInfo`](axum::extract::ConnectInfo) object
 pub struct NegotiateMiddleware<S> {
     inner: S,
     spn: String,
