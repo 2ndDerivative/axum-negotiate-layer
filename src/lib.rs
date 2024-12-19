@@ -58,7 +58,7 @@ impl PendingServerContext {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Authenticated(Option<String>);
 impl Authenticated {
     fn from_finished_context(f: &mut FinishedServerContext) -> Self {
