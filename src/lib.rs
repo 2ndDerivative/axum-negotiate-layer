@@ -10,7 +10,7 @@ use cross_krb5::{AcceptFlags, K5ServerCtx, PendingServerCtx, ServerCtx};
 use futures_util::future::BoxFuture;
 use std::{
     fmt::Debug,
-    ops::{Deref, DerefMut},
+    ops::DerefMut,
     sync::{Arc, Mutex},
     task::{Context, Poll},
 };
@@ -25,12 +25,12 @@ enum NegotiateState {
     #[default]
     Unauthorized,
     Pending(PendingServerContext),
-    Authorized,
+    Authenticated(FinishedServerContext),
 }
 impl Debug for NegotiateState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Authorized => f.write_str("Authorized"),
+            Self::Authenticated(_) => f.write_str("Authorized"),
             Self::Pending(_) => f.write_str("Pending"),
             Self::Unauthorized => f.write_str("Unauthorized"),
         }
@@ -142,7 +142,8 @@ where
             None => return Box::pin(async { Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response()) }),
         };
         let mut lock = connection.auth.lock().unwrap();
-        if let NegotiateState::Authorized = lock.deref() {
+        if let NegotiateState::Authenticated(f) = lock.deref_mut() {
+            parts.extensions.insert(Authenticated::from_finished_context(f));
             let request = Request::from_parts(parts, body);
             let next_future = self.inner.call(request);
             return Box::pin(next_future);
@@ -152,7 +153,7 @@ where
             Err(response) => return Box::pin(async { Ok(response) }),
         };
         let Ok(context) = (match std::mem::replace(lock.deref_mut(), NegotiateState::Unauthorized) {
-            NegotiateState::Authorized => unreachable!(),
+            NegotiateState::Authenticated(_) => unreachable!(),
             NegotiateState::Pending(context) => Ok(context),
             NegotiateState::Unauthorized if is_ntlm(token) => PendingServerContext::new_ntlm(&self.spn),
             NegotiateState::Unauthorized => PendingServerContext::new_kerberos(&self.spn),
@@ -174,7 +175,7 @@ where
                 parts.extensions.insert(Authenticated::from_finished_context(&mut f));
                 let request = Request::from_parts(parts, body);
                 let next_future = self.inner.call(request);
-                *lock = NegotiateState::Authorized;
+                *lock = NegotiateState::Authenticated(f);
                 Box::pin(next_future)
             }
             StepResult::ContinueWith(server_context, response) => {
