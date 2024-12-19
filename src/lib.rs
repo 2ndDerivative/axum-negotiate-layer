@@ -165,7 +165,7 @@ where
                 ntlm::handle_ntlm(ntlm, token)
             }
             PendingServerContext::Kerberos(kerberos) => {
-                eprintln!("Using NTLM!");
+                eprintln!("Using Kerberos!");
                 kerberos::handle_kerberos(kerberos, token)
             }
         };
