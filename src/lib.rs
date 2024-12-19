@@ -101,11 +101,11 @@ impl<T> Connected<T> for NegotiateInfo {
     }
 }
 
-/// [`Layer`](tower::Layer) which will enforce authentication
+/// [`Layer`] which will enforce authentication
 ///
 /// The SPN must be correctly installed in the local realm
 ///
-/// Also a [`ConnectInfo`](axum::extract::ConnectInfo) extension must have been set on the router.
+/// Also a [`ConnectInfo`] extension must have been set on the router.
 #[derive(Clone)]
 pub struct NegotiateLayer {
     spn: String,
@@ -127,7 +127,7 @@ impl<S> Layer<S> for NegotiateLayer {
 ///
 /// A layer may be made from this via [`NegotiateLayer::new`]
 ///
-/// This middleware will not work without the [`NegotiateInfo`] [`ConnectInfo`](axum::extract::ConnectInfo) object
+/// This middleware will not work without the [`NegotiateInfo`] [`ConnectInfo`] object
 pub struct NegotiateMiddleware<S> {
     inner: S,
     spn: String,
