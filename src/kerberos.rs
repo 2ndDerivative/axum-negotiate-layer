@@ -14,9 +14,9 @@ pub fn handle_kerberos(context: PendingServerCtx, token: &str) -> StepResult {
         return StepResult::Error(StatusCode::BAD_REQUEST.into_response());
     };
     match context.step(&header_bytes) {
-        Ok(Step::Continue((ctx, server_response_bytes))) => {
+        Ok(Step::Continue((ctx, response_bytes))) => {
             let mut header_map = HeaderMap::new();
-            let encoded = BASE64_STANDARD.encode(server_response_bytes.as_ref());
+            let encoded = BASE64_STANDARD.encode(response_bytes.as_ref());
             let hv = HeaderValue::from_str(&format!("Negotiate {encoded}"))
                 .expect("Base64-string should be valid header material");
             header_map.insert(WWW_AUTHENTICATE, hv);
