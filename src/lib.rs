@@ -15,9 +15,11 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
+#[cfg(windows)]
 use winauth::windows::{NtlmSspi, NtlmSspiBuilder};
 
 mod kerberos;
+#[cfg(windows)]
 mod ntlm;
 
 #[derive(Default)]
@@ -39,6 +41,7 @@ impl Debug for NegotiateState {
 
 enum PendingServerContext {
     Kerberos(PendingServerCtx),
+    #[cfg(windows)]
     Ntlm(NtlmSspi),
 }
 impl PendingServerContext {
@@ -47,6 +50,7 @@ impl PendingServerContext {
             ServerCtx::new(AcceptFlags::NEGOTIATE_TOKEN, Some(spn)).map_err(|x| x.to_string())?,
         ))
     }
+    #[cfg(windows)]
     fn new_ntlm(spn: &str) -> Result<Self, String> {
         Ok(PendingServerContext::Ntlm(
             NtlmSspiBuilder::new()
@@ -72,12 +76,14 @@ impl Authenticated {
 }
 enum FinishedServerContext {
     Kerberos(ServerCtx),
+    #[cfg(windows)]
     Ntlm(NtlmSspi),
 }
 impl FinishedServerContext {
     fn client(&mut self) -> Option<String> {
         match self {
             Self::Kerberos(k) => k.client().ok(),
+            #[cfg(windows)]
             Self::Ntlm(n) => n.client_identity().ok(),
         }
     }
@@ -169,12 +175,18 @@ where
         let Ok(context) = (match std::mem::replace(lock.deref_mut(), NegotiateState::Unauthorized) {
             NegotiateState::Authenticated(_) => unreachable!(),
             NegotiateState::Pending(context) => Ok(context),
+            #[cfg(windows)]
             NegotiateState::Unauthorized if is_ntlm(token) => PendingServerContext::new_ntlm(&self.spn),
+            #[cfg(not(windows))]
+            NegotiateState::Unauthorized if is_ntlm(token) => {
+                unimplemented!("NTLM is not yet supported on non-windows platforms")
+            }
             NegotiateState::Unauthorized => PendingServerContext::new_kerberos(&self.spn),
         }) else {
             return Box::pin(async { Ok(failed_to_create_context()) });
         };
         let step_result = match context {
+            #[cfg(windows)]
             PendingServerContext::Ntlm(ntlm) => ntlm::handle_ntlm(ntlm, token),
             PendingServerContext::Kerberos(kerberos) => kerberos::handle_kerberos(kerberos, token),
         };
