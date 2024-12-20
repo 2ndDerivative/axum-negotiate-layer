@@ -1,3 +1,47 @@
+//! axum-negotiate-layer provides middleware for authenticating connections over the Microsoft "HTTP Negotiate" extension.
+//!
+//! # Features
+//!
+//! - [`NegotiateMiddleware`]: A [`tower::Service`] object that uses the [`NegotiateInfo`] attached to the connection to authenticate that connection
+//! - [`NegotiateLayer`]: A [`tower::Layer`] for the above mentioned service
+//! - A [`Authenticated`] request extension object to get information about authenticated clients (so far only the user identity)
+//!
+//! # Incompleteness
+//! NTLM authentication is not available on non-Windows systems. These will have to stop NTLM tokens from reaching this crate's service or it will panic
+//!
+//! # Usage
+//! The middleware and layer require the Kerberos SPN for the Router in question.
+//!
+//! ```rust,no_run
+//! use axum::{routing::get, Extension, Router};
+//! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer};
+//! use tokio::net::TcpListener;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let router = Router::new()
+//!         .route("/", get(hello))
+//!         .layer(NegotiateLayer::new("HTTP/example.com"))
+//!         .into_make_service_with_connect_info::<NegotiateInfo>();
+//!     let listener = TcpListener::bind("0.0.0.0:80").await.unwrap();
+//!     axum::serve(listener, router).await.unwrap();
+//! }
+//! ```
+//!
+//! The most convenient use case shown above will use the layer object to verify all routes above it are authenticated.
+//! The [`Router::into_make_service_with_connect_info`](axum::Router::into_make_service_with_connect_info) call is mandatory for this layer to work
+//! on the used Router, otherwise the layer will only return Status code 500. (will probably be changed to a panic in the future).
+//!
+//! ## Axum handler usage example
+//!
+//! ```rust,no_run
+//! async fn hello(Extension(a): Extension<Authenticated>) -> String {
+//!     format!("Hello, {}!", a.client().unwrap_or("whoever"))
+//! }
+//! ```
+//!
+//! When getting the [`Authenticated`] object from the request extension, the authentication can be guaranteed for this route, as this object can
+//! only be set by a middleware of this crate.
 use axum::{
     extract::{connect_info::Connected, ConnectInfo, Request},
     http::{
