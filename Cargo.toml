@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Niclas Klugmann <niclas@klugmann.de>"]
 description = "Negotiate HTTP layer library for axum."
 repository = "https://github.com/2ndDerivative/axum-negotiate-layer"
+documentation = "https://docs.rs/axum-negotiate-layer"
 license = "MIT"
 keywords = ["authentication", "kerberos", "ntlm", "gssapi", "axum"]
 
