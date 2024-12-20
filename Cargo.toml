@@ -14,4 +14,6 @@ base64 = "0.22.1"
 cross-krb5 = { version = "0.4.1", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 tower = { version = "0.5.2", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
 winauth = "0.0.5"
