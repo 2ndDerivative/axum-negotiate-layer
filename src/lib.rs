@@ -177,7 +177,8 @@ impl<S> Layer<S> for NegotiateLayer {
 ///
 /// A layer may be made from this via [`NegotiateLayer::new`]
 ///
-/// This middleware will not work without the [`NegotiateInfo`] [`ConnectInfo`] object
+/// This middleware will not work without the [`NegotiateInfo`] [`ConnectInfo`] object.
+/// If there is no such connection information set, this middleware will panic.
 pub struct NegotiateMiddleware<S> {
     inner: S,
     spn: String,
@@ -203,7 +204,7 @@ where
         let (mut parts, body) = req.into_parts();
         let ConnectInfo(connection) = match parts.extensions.get::<ConnectInfo<NegotiateInfo>>().cloned() {
             Some(negotiate_info) => negotiate_info,
-            None => return Box::pin(async { Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response()) }),
+            None => panic!("No NegotiateInfo ConnectInfo was given. you may have forgotten to use into_make_service_with_connect_info"),
         };
         let mut lock = connection.auth.lock().unwrap();
         if let NegotiateState::Authenticated(f) = lock.deref_mut() {
