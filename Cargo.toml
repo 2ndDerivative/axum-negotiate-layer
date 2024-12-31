@@ -16,7 +16,7 @@ axum = { version = "0.7.9", default-features = false, features = ["tokio"] }
 base64 = "0.22.1"
 futures-util = { version = "0.3.31", default-features = false }
 tower = { version = "0.5.2", default-features = false }
-kenobi = { version = "0.1.0", path = "../kenobi" }
+kenobi = { version = "0.1.1", path = "../kenobi" }
 
 [dev-dependencies]
 axum = { version = "0.7.9", default-features = false, features = ["http1"] }
