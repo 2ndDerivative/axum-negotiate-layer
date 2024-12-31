@@ -2,6 +2,7 @@
 name = "axum-negotiate-layer"
 version = "0.1.2"
 edition = "2021"
+resolver = "2"
 authors = ["Niclas Klugmann <niclas@klugmann.de>"]
 description = "Negotiate HTTP layer library for axum."
 repository = "https://github.com/2ndDerivative/axum-negotiate-layer"
@@ -13,9 +14,10 @@ keywords = ["authentication", "kerberos", "ntlm", "gssapi", "axum"]
 [dependencies]
 axum = { version = "0.7.9", default-features = false, features = ["tokio"] }
 base64 = "0.22.1"
-cross-krb5 = { version = "0.4.1", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 tower = { version = "0.5.2", default-features = false }
+kenobi = { version = "0.1.0", path = "../kenobi" }
 
-[target.'cfg(windows)'.dependencies]
-winauth = "0.0.5"
+[dev-dependencies]
+axum = { version = "0.7.9", default-features = false, features = ["http1"] }
+tokio = { version = "1.42.0", features = ["macros", "net", "rt-multi-thread"] }

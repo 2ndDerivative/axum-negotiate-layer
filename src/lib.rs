@@ -12,7 +12,7 @@
 //! # Usage
 //! The middleware and layer require the Kerberos SPN for the Router in question.
 //!
-//! ```rust,no_run
+//! ```rust
 //! use axum::{routing::get, Extension, Router};
 //! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer};
 //! use tokio::net::TcpListener;
@@ -23,9 +23,9 @@
 //!         .route("/", get(hello))
 //!         .layer(NegotiateLayer::new("HTTP/example.com"))
 //!         .into_make_service_with_connect_info::<NegotiateInfo>();
-//!     let listener = TcpListener::bind("0.0.0.0:80").await.unwrap();
-//!     axum::serve(listener, router).await.unwrap();
+//!     let listener = TcpListener::bind("127.0.0.1:80").await.unwrap();
 //! }
+//! # async fn hello() {}
 //! ```
 //!
 //! The most convenient use case shown above will use the layer object to verify all routes above it are authenticated.
@@ -34,44 +34,54 @@
 //!
 //! ## Axum handler usage example
 //!
-//! ```rust,no_run
-//! async fn hello(Extension(a): Extension<Authenticated>) -> String {
-//!     format!("Hello, {}!", a.client().unwrap_or("whoever"))
+//! ```rust
+//! # use axum_negotiate_layer::Authenticated;
+//! async fn hello(a: Authenticated) -> String {
+//!     format!("Hello, {}!", a.client().unwrap_or("whoever".to_owned()))
 //! }
 //! ```
 //!
-//! When getting the [`Authenticated`] object from the request extension, the authentication can be guaranteed for this route, as this object can
+//! Alternatively, this works:
+//! ```rust
+//! # use axum::Extension;
+//! # use axum_negotiate_layer::Authenticated;
+//! async fn hello(Extension(a): Extension<Authenticated>) -> String {
+//!     format!("Hello, {}!", a.client().unwrap_or("whoever".to_owned()))
+//! }
+//! ```
+//!
+//! When getting the [`Authenticated`] object from the request extension or extracting it directly, the authentication can be guaranteed for this route, as this object can
 //! only be set by a middleware of this crate.
 use axum::{
-    extract::{connect_info::Connected, ConnectInfo, Request},
+    extract::{connect_info::Connected, ConnectInfo, FromRequestParts, Request},
     http::{
         header::{AUTHORIZATION, CONNECTION, WWW_AUTHENTICATE},
+        request::Parts,
         HeaderMap, HeaderValue, StatusCode,
     },
     response::{IntoResponse, Response},
 };
-use cross_krb5::{AcceptFlags, K5ServerCtx, PendingServerCtx, ServerCtx};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::future::BoxFuture;
+use kenobi::{ContextBuilder, FinishedContext, PendingContext, SecurityInfo};
+use sspi::handle_sspi;
 use std::{
+    convert::Infallible,
     fmt::Debug,
-    ops::DerefMut,
-    sync::{Arc, Mutex},
-    task::{Context, Poll},
+    ops::Deref,
+    sync::{Arc, RwLock},
+    task::Poll,
 };
 use tower::{Layer, Service};
-#[cfg(windows)]
-use winauth::windows::{NtlmSspi, NtlmSspiBuilder};
 
-mod kerberos;
-#[cfg(windows)]
-mod ntlm;
+mod sspi;
 
 #[derive(Default)]
 enum NegotiateState {
     #[default]
     Unauthorized,
-    Pending(PendingServerContext),
-    Authenticated(FinishedServerContext),
+    Pending(PendingContext),
+    Authenticated(FinishedContext),
 }
 impl Debug for NegotiateState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -83,62 +93,50 @@ impl Debug for NegotiateState {
     }
 }
 
-enum PendingServerContext {
-    Kerberos(PendingServerCtx),
-    #[cfg(windows)]
-    Ntlm(NtlmSspi),
-}
-impl PendingServerContext {
-    fn new_kerberos(spn: &str) -> Result<Self, String> {
-        Ok(PendingServerContext::Kerberos(
-            ServerCtx::new(AcceptFlags::NEGOTIATE_TOKEN, Some(spn)).map_err(|x| x.to_string())?,
-        ))
-    }
-    #[cfg(windows)]
-    fn new_ntlm(spn: &str) -> Result<Self, String> {
-        Ok(PendingServerContext::Ntlm(
-            NtlmSspiBuilder::new()
-                .inbound()
-                .target_spn(spn)
-                .build()
-                .map_err(|x| x.to_string())?,
-        ))
-    }
-}
-
-/// [`Extension`](axum::Extension) type that gets set after successful Authentication
+/// [`Extension`](axum::Extension) or Extractor type that gets set after successful Authentication
+// This struct can only be created by the middleware in this crate or cloned from an
+// existing one. Extracting it directly panics when the Layer has not been applied yet.
 #[derive(Debug, Clone)]
-pub struct Authenticated(Option<String>);
+pub struct Authenticated(Arc<RwLock<NegotiateState>>);
 impl Authenticated {
-    fn from_finished_context(f: &mut FinishedServerContext) -> Self {
-        let client = f.client();
-        Self(client)
+    fn call<T>(&self, f: impl Fn(&FinishedContext) -> T) -> T {
+        match self.0.read().unwrap().deref() {
+            NegotiateState::Authenticated(x) => f(x),
+            _ => unreachable!("Authenticated only exists after successful authentication"),
+        }
     }
-    pub fn client(&self) -> Option<&str> {
-        self.0.as_deref()
+    pub fn client(&self) -> Option<String> {
+        self.call(|x| x.client_native_name().ok().map(|os| os.to_string_lossy().into_owned()))
     }
 }
-enum FinishedServerContext {
-    Kerberos(ServerCtx),
-    #[cfg(windows)]
-    Ntlm(NtlmSspi),
-}
-impl FinishedServerContext {
-    fn client(&mut self) -> Option<String> {
-        match self {
-            Self::Kerberos(k) => k.client().ok(),
-            #[cfg(windows)]
-            Self::Ntlm(n) => n.client_identity().ok(),
+#[axum::async_trait]
+impl<S> FromRequestParts<S> for Authenticated {
+    type Rejection = Infallible;
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let auth = get_state_from_extension(parts);
+        match auth.clone().read().unwrap().deref() {
+            NegotiateState::Unauthorized | NegotiateState::Pending(_) => {
+                panic!("NegotiateInfo was not authorized. you may have extracted `Authenticated` outside of the layer")
+            }
+            NegotiateState::Authenticated(_) => Ok(Authenticated(auth)),
         }
     }
 }
 
+fn get_state_from_extension(parts: &Parts) -> Arc<RwLock<NegotiateState>> {
+    match parts.extensions.get::<ConnectInfo<NegotiateInfo>>().cloned() {
+        Some(ConnectInfo(NegotiateInfo { auth })) => auth,
+        None => panic!(
+            "No NegotiateInfo ConnectInfo was given. you may have forgotten to use into_make_service_with_connect_info"
+        ),
+    }
+}
 /// Type that must be set via [`Router::into_make_service_with_connect_info`](axum::Router::into_make_service_with_connect_info).
 ///
 /// Without this, the [`NegotiateLayer`] will not work
 #[derive(Clone, Debug, Default)]
 pub struct NegotiateInfo {
-    auth: Arc<Mutex<NegotiateState>>,
+    auth: Arc<RwLock<NegotiateState>>,
 }
 impl NegotiateInfo {
     pub fn new() -> Self {
@@ -197,47 +195,38 @@ where
     type Response = S::Response;
     type Error = S::Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
     fn call(&mut self, req: Request) -> Self::Future {
         let (mut parts, body) = req.into_parts();
-        let ConnectInfo(connection) = match parts.extensions.get::<ConnectInfo<NegotiateInfo>>().cloned() {
-            Some(negotiate_info) => negotiate_info,
-            None => panic!("No NegotiateInfo ConnectInfo was given. you may have forgotten to use into_make_service_with_connect_info"),
-        };
-        let mut lock = connection.auth.lock().unwrap();
-        if let NegotiateState::Authenticated(f) = lock.deref_mut() {
-            parts.extensions.insert(Authenticated::from_finished_context(f));
+        let auth = get_state_from_extension(&parts);
+        let lock = auth.read().unwrap();
+        if let NegotiateState::Authenticated(_) = lock.deref() {
             let request = Request::from_parts(parts, body);
-            let next_future = self.inner.call(request);
-            return Box::pin(next_future);
+            return Box::pin(self.inner.call(request));
         }
         let token = match extract_token(&parts.headers) {
             Ok(token) => token,
-            Err(response) => return Box::pin(async { Ok(response) }),
-        };
-        let Ok(context) = (match std::mem::replace(lock.deref_mut(), NegotiateState::Unauthorized) {
-            NegotiateState::Authenticated(_) => unreachable!(),
-            NegotiateState::Pending(context) => Ok(context),
-            #[cfg(windows)]
-            NegotiateState::Unauthorized if is_ntlm(token) => PendingServerContext::new_ntlm(&self.spn),
-            #[cfg(not(windows))]
-            NegotiateState::Unauthorized if is_ntlm(token) => {
-                unimplemented!("NTLM is not yet supported on non-windows platforms")
+            Err(response) => {
+                return Box::pin(async { Ok(response) });
             }
-            NegotiateState::Unauthorized => PendingServerContext::new_kerberos(&self.spn),
-        }) else {
-            return Box::pin(async { Ok(failed_to_create_context()) });
         };
-        let step_result = match context {
-            #[cfg(windows)]
-            PendingServerContext::Ntlm(ntlm) => ntlm::handle_ntlm(ntlm, token),
-            PendingServerContext::Kerberos(kerberos) => kerberos::handle_kerberos(kerberos, token),
+        let mut lock = auth.write().unwrap();
+        let step_result = match std::mem::take(&mut *lock) {
+            NegotiateState::Authenticated(_) => unreachable!(),
+            NegotiateState::Pending(context) => handle_sspi(context, token),
+            NegotiateState::Unauthorized => match ContextBuilder::new(Some(&self.spn)) {
+                Ok(context) => handle_sspi(context, token),
+                Err(_) => return Box::pin(async { Ok(failed_to_create_context()) }),
+            },
         };
         match step_result {
-            StepResult::Finished(mut f) => {
-                parts.extensions.insert(Authenticated::from_finished_context(&mut f));
+            StepResult::Finished(f, maybe_token) => {
+                if let Some(token) = maybe_token {
+                    parts.headers.append(WWW_AUTHENTICATE, to_negotiate_header(&token));
+                }
+                parts.extensions.insert(Authenticated(auth.clone()));
                 let request = Request::from_parts(parts, body);
                 let next_future = self.inner.call(request);
                 *lock = NegotiateState::Authenticated(f);
@@ -255,14 +244,15 @@ where
     }
 }
 
-enum StepResult {
-    Finished(FinishedServerContext),
-    ContinueWith(PendingServerContext, Response),
-    Error(Response),
+fn to_negotiate_header(token_bytes: &[u8]) -> HeaderValue {
+    let encoded = BASE64_STANDARD.encode(token_bytes.as_ref());
+    HeaderValue::from_str(&format!("Negotiate {encoded}")).expect("Base64-string should be valid header material")
 }
 
-fn is_ntlm(token: &str) -> bool {
-    token.starts_with("TlR")
+enum StepResult {
+    Finished(FinishedContext, Option<Box<[u8]>>),
+    ContinueWith(PendingContext, Response),
+    Error(Response),
 }
 
 fn extract_token(headers: &HeaderMap) -> Result<&str, Response> {
