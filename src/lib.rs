@@ -83,6 +83,11 @@ enum NegotiateState {
     Pending(PendingContext),
     Authenticated(FinishedContext),
 }
+impl NegotiateState {
+    fn is_authenticated(&self) -> bool {
+        matches!(self, Self::Authenticated(_))
+    }
+}
 impl Debug for NegotiateState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -114,11 +119,10 @@ impl<S> FromRequestParts<S> for Authenticated {
     type Rejection = Infallible;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
         let auth = get_state_from_extension(parts);
-        match auth.clone().read().unwrap().deref() {
-            NegotiateState::Unauthorized | NegotiateState::Pending(_) => {
-                panic!("NegotiateInfo was not authorized. you may have extracted `Authenticated` outside of the layer")
-            }
-            NegotiateState::Authenticated(_) => Ok(Authenticated(auth)),
+        if auth.clone().read().unwrap().is_authenticated() {
+            Ok(Authenticated(auth))
+        } else {
+            panic!("NegotiateInfo was not authorized. you may have extracted `Authenticated` outside of the layer")
         }
     }
 }
@@ -201,8 +205,9 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let (mut parts, body) = req.into_parts();
         let auth = get_state_from_extension(&parts);
-        let lock = auth.read().unwrap();
-        if let NegotiateState::Authenticated(_) = lock.deref() {
+        // If anyone moves this .read() call around remember to not accidentally deadlock
+        // with the write() call below
+        if auth.read().unwrap().deref().is_authenticated() {
             let request = Request::from_parts(parts, body);
             return Box::pin(self.inner.call(request));
         }
