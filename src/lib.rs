@@ -43,7 +43,7 @@
 //! When getting the [`Authenticated`] object from the request extension, the authentication can be guaranteed for this route, as this object can
 //! only be set by a middleware of this crate.
 use axum::{
-    extract::{connect_info::Connected, ConnectInfo, Request},
+    extract::{ConnectInfo, Request},
     http::{
         header::{AUTHORIZATION, CONNECTION, WWW_AUTHENTICATE},
         HeaderMap, HeaderValue, StatusCode,
@@ -63,8 +63,12 @@ use tower::{Layer, Service};
 use winauth::windows::{NtlmSspi, NtlmSspiBuilder};
 
 mod kerberos;
+#[cfg(any(feature = "http1", feature = "http2"))]
+mod listener;
 #[cfg(windows)]
 mod ntlm;
+#[cfg(any(feature = "http1", feature = "http2"))]
+pub use listener::{AddNegotiateInfo, Negotiated, WithNegotiateInfo};
 
 #[derive(Default)]
 enum NegotiateState {
@@ -143,11 +147,6 @@ pub struct NegotiateInfo {
 impl NegotiateInfo {
     pub fn new() -> Self {
         Self::default()
-    }
-}
-impl<T> Connected<T> for NegotiateInfo {
-    fn connect_info(_target: T) -> Self {
-        Self::new()
     }
 }
 
