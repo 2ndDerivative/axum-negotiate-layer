@@ -18,10 +18,10 @@ futures-util = { version = "0.3.31", default-features = false }
 tokio = { version = "1.42.0", default-features = false, optional = true, features = ["net"] }
 tower = { version = "0.5.2", default-features = false }
 
-[target.'cfg(windows)'.dependencies]
-winauth = "0.0.5"
-
 [features]
 default = ["http1"]
 http1 = ["axum/http1", "tokio"]
 http2 = ["axum/http2", "tokio"]
+
+[dev-dependencies]
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"]}

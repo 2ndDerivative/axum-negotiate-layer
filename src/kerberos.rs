@@ -1,4 +1,4 @@
-use crate::{unauthorized, FinishedServerContext, StepResult};
+use crate::{unauthorized, StepResult};
 use axum::{
     http::{
         header::{CONNECTION, WWW_AUTHENTICATE},
@@ -9,7 +9,7 @@ use axum::{
 use base64::{prelude::BASE64_STANDARD, Engine};
 use cross_krb5::{PendingServerCtx, Step};
 
-pub fn handle_kerberos(context: PendingServerCtx, token: &str) -> StepResult {
+pub fn handle(context: PendingServerCtx, token: &str) -> StepResult {
     let Ok(header_bytes) = BASE64_STANDARD.decode(token) else {
         return StepResult::Error(StatusCode::BAD_REQUEST.into_response());
     };
@@ -22,9 +22,9 @@ pub fn handle_kerberos(context: PendingServerCtx, token: &str) -> StepResult {
             header_map.insert(WWW_AUTHENTICATE, hv);
             header_map.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
             let response = (StatusCode::UNAUTHORIZED, header_map, "").into_response();
-            StepResult::ContinueWith(crate::PendingServerContext::Kerberos(ctx), response)
+            StepResult::ContinueWith(ctx, response)
         }
-        Ok(Step::Finished((ctx, _e))) => StepResult::Finished(FinishedServerContext::Kerberos(ctx)),
+        Ok(Step::Finished((ctx, _e))) => StepResult::Finished(ctx),
         Err(_e) => StepResult::Error(unauthorized("authorization failed")),
     }
 }
