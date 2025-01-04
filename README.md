@@ -19,7 +19,7 @@ async fn main() {
 }
 
 async fn hello(Extension(a): Extension<Authenticated>) -> String {
-    format!("Hello, {}!", a.client().unwrap_or("whoever"))
+    format!("Hello, {}!", a.client().unwrap_or("whoever".into()))
 }
 ```
 
