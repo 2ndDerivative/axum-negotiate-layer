@@ -5,16 +5,16 @@
 //! - [`NegotiateMiddleware`]: A [`tower::Service`] object that uses the [`NegotiateInfo`] attached to the connection to authenticate that connection
 //! - [`NegotiateLayer`]: A [`tower::Layer`] for the above mentioned service
 //! - A [`Authenticated`] request extension object to get information about authenticated clients (so far only the user identity)
-//!
-//! # Incompleteness
-//! NTLM authentication is not available on non-Windows systems. These will have to stop NTLM tokens from reaching this crate's service or it will panic
+//! - An extension to the standard [`axum::serve::Listener`] (with feature `http1` or `http2`) to add negotiation info to every connection.
+//!   As SPNEGO is a non-http standard authentication method authenticating by connection, the negotiation info has to be included in every
+//!   connection given to axum, either via this struct or by manually providing it as a `ConnectInfo` extension when driving the routing loop yourself.
 //!
 //! # Usage
 //! The middleware and layer require the Kerberos SPN for the Router in question.
 //!
 //! ```rust
 //! use axum::{routing::get, Extension, Router};
-//! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer};
+//! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer, AddNegotiateInfo};
 //! use tokio::net::TcpListener;
 //!
 //! #[tokio::main]
@@ -30,7 +30,7 @@
 //!
 //! The most convenient use case shown above will use the layer object to verify all routes above it are authenticated.
 //! The [`Router::into_make_service_with_connect_info`](axum::Router::into_make_service_with_connect_info) call is mandatory for this layer to work
-//! on the used Router, otherwise the layer will only return Status code 500. (will probably be changed to a panic in the future).
+//! on the used Router, otherwise the layer will panic.
 //!
 //! ## Axum handler usage example
 //!
@@ -53,7 +53,7 @@
 //! When getting the [`Authenticated`] object from the request extension or extracting it directly, the authentication can be guaranteed for this route, as this object can
 //! only be set by a middleware of this crate.
 use axum::{
-    extract::{connect_info::Connected, ConnectInfo, FromRequestParts, Request},
+    extract::{ConnectInfo, FromRequestParts, Request},
     http::{
         header::{AUTHORIZATION, CONNECTION, WWW_AUTHENTICATE},
         request::Parts,
@@ -74,7 +74,11 @@ use std::{
 };
 use tower::{Layer, Service};
 
+#[cfg(any(feature = "http1", feature = "http2"))]
+mod listener;
 mod sspi;
+#[cfg(any(feature = "http1", feature = "http2"))]
+pub use listener::{HasNegotiateInfo, Negotiator, WithNegotiateInfo};
 
 #[derive(Default)]
 enum NegotiateState {
@@ -91,9 +95,9 @@ impl NegotiateState {
 impl Debug for NegotiateState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Authenticated(_) => f.write_str("Authorized"),
+            Self::Authenticated(_) => f.write_str("Authenticated"),
             Self::Pending(_) => f.write_str("Pending"),
-            Self::Unauthorized => f.write_str("Unauthorized"),
+            Self::Unauthorized => f.write_str("Unauthenticated"),
         }
     }
 }
@@ -114,8 +118,7 @@ impl Authenticated {
         self.call(|x| x.client_native_name().ok().map(|os| os.to_string_lossy().into_owned()))
     }
 }
-#[axum::async_trait]
-impl<S> FromRequestParts<S> for Authenticated {
+impl<S: Sync> FromRequestParts<S> for Authenticated {
     type Rejection = Infallible;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
         let auth = get_state_from_extension(parts);
@@ -143,13 +146,10 @@ pub struct NegotiateInfo {
     auth: Arc<RwLock<NegotiateState>>,
 }
 impl NegotiateInfo {
+    #[must_use]
+    /// You should probably only have to use this if you drive the IO loop yourself instead of using [`axum::serve()`]
     pub fn new() -> Self {
         Self::default()
-    }
-}
-impl<T> Connected<T> for NegotiateInfo {
-    fn connect_info(_target: T) -> Self {
-        Self::new()
     }
 }
 
@@ -163,6 +163,7 @@ pub struct NegotiateLayer {
     spn: String,
 }
 impl NegotiateLayer {
+    #[must_use]
     pub fn new(spn: &str) -> Self {
         Self { spn: spn.to_owned() }
     }
@@ -186,6 +187,7 @@ pub struct NegotiateMiddleware<S> {
     spn: String,
 }
 impl<S> NegotiateMiddleware<S> {
+    #[must_use]
     pub fn new(service: S, spn: &str) -> NegotiateMiddleware<S> {
         let spn = spn.into();
         NegotiateMiddleware { inner: service, spn }
