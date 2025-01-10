@@ -64,12 +64,16 @@ where
         pin!(&mut self.0).poll_shutdown(cx)
     }
 }
-#[cfg(any(feature = "http1", feature = "http2"))]
 impl<L> Connected<IncomingStream<'_, HasNegotiateInfo<L>>> for NegotiateInfo
 where
     L: Listener,
 {
     fn connect_info(target: IncomingStream<'_, HasNegotiateInfo<L>>) -> Self {
         target.io().1.clone()
+    }
+}
+impl Connected<NegotiateInfo> for NegotiateInfo {
+    fn connect_info(value: NegotiateInfo) -> Self {
+        value
     }
 }
