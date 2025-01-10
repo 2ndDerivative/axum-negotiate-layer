@@ -17,7 +17,7 @@ base64 = "0.22.1"
 futures-util = { version = "0.3.31", default-features = false }
 tokio = { version = "1.42.0", default-features = false, optional = true, features = ["net"] }
 tower = { version = "0.5.2", default-features = false }
-kenobi = { version = "0.1.1", path = "../kenobi" }
+kenobi = "0.1.1"
 
 [features]
 default = ["http1"]
