@@ -72,8 +72,3 @@ where
         target.io().1.clone()
     }
 }
-impl Connected<NegotiateInfo> for NegotiateInfo {
-    fn connect_info(value: NegotiateInfo) -> Self {
-        value
-    }
-}

@@ -53,7 +53,7 @@
 //! When getting the [`Authenticated`] object from the request extension or extracting it directly, the authentication can be guaranteed for this route, as this object can
 //! only be set by a middleware of this crate.
 use axum::{
-    extract::{ConnectInfo, FromRequestParts, Request},
+    extract::{connect_info::Connected, ConnectInfo, FromRequestParts, Request},
     http::{
         header::{AUTHORIZATION, CONNECTION, WWW_AUTHENTICATE},
         request::Parts,
@@ -144,6 +144,11 @@ fn get_state_from_extension(parts: &Parts) -> Arc<RwLock<NegotiateState>> {
 #[derive(Clone, Debug, Default)]
 pub struct NegotiateInfo {
     auth: Arc<RwLock<NegotiateState>>,
+}
+impl Connected<NegotiateInfo> for NegotiateInfo {
+    fn connect_info(value: NegotiateInfo) -> Self {
+        value
+    }
 }
 impl NegotiateInfo {
     #[must_use]
