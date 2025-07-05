@@ -1,12 +1,10 @@
-use crate::{to_negotiate_header, unauthorized, StepResult};
-use axum::{
-    http::{
-        header::{CONNECTION, WWW_AUTHENTICATE},
-        HeaderMap, HeaderValue, StatusCode,
-    },
-    response::IntoResponse,
+use crate::{StepResult, to_negotiate_header, unauthorized};
+use axum_core::response::IntoResponse;
+use base64::{Engine, prelude::BASE64_STANDARD};
+use http::{
+    HeaderMap, HeaderValue, StatusCode,
+    header::{CONNECTION, WWW_AUTHENTICATE},
 };
-use base64::{prelude::BASE64_STANDARD, Engine};
 use kenobi::{Step, StepSuccess};
 
 pub fn handle_sspi(context: impl Step, token: &str) -> StepResult {

@@ -1,7 +1,7 @@
 [package]
 name = "axum-negotiate-layer"
 version = "0.2.1"
-edition = "2021"
+edition = "2024"
 resolver = "2"
 authors = ["Niclas Klugmann <niclas@klugmann.de>"]
 description = "Negotiate HTTP layer library for axum."
@@ -12,17 +12,19 @@ license = "MIT"
 keywords = ["authentication", "kerberos", "ntlm", "gssapi", "axum"]
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["tokio"] }
+axum = { version = "0.8", optional = true, default-features = false, features = ["tokio"] }
 base64 = "0.22.1"
 futures-util = { version = "0.3.31", default-features = false }
 tokio = { version = "1.42.0", default-features = false, optional = true, features = ["net"] }
 tower = { version = "0.5.2", default-features = false }
 kenobi = "0.1.1"
+http = "1.3.1"
+axum-core = "0.5.2"
 
 [features]
 default = ["http1"]
-http1 = ["axum/http1", "tokio"]
-http2 = ["axum/http2", "tokio"]
+http1 = ["dep:axum", "axum/http1", "tokio"]
+http2 = ["dep:axum", "axum/http2", "tokio"]
 
 [dev-dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1"] }

@@ -1,13 +1,12 @@
-use std::{
-    pin::{pin, Pin},
-    task::{Context, Poll},
-};
-
 use axum::{
     extract::connect_info::Connected,
     serve::{IncomingStream, Listener},
 };
 use futures_util::FutureExt;
+use std::{
+    pin::{Pin, pin},
+    task::{Context, Poll},
+};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::NegotiateInfo;
