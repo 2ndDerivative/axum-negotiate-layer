@@ -17,7 +17,7 @@ base64 = "0.22.1"
 futures-util = { version = "0.3.31", default-features = false }
 tokio = { version = "1.42.0", default-features = false, optional = true, features = ["net"] }
 tower = { version = "0.5.2", default-features = false }
-kenobi = "0.1.1"
+kenobi = {version ="0.1.1", git = "https://github.com/2ndDerivative/kenobi", branch = "impersonate" }
 http = "1.3.1"
 axum-core = "0.5.2"
 

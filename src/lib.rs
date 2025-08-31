@@ -53,18 +53,20 @@
 //! When getting the [`Authenticated`] object from the request extension or extracting it directly, the authentication can be guaranteed for this route, as this object can
 //! only be set by a middleware of this crate.
 use axum::{
-    extract::{connect_info::Connected, ConnectInfo, FromRequestParts, Request},
+    extract::{ConnectInfo, FromRequestParts, Request, connect_info::Connected},
     http::{
+        HeaderMap, HeaderValue, StatusCode,
         header::{AUTHORIZATION, CONNECTION, WWW_AUTHENTICATE},
         request::Parts,
-        HeaderMap, HeaderValue, StatusCode,
     },
     response::{IntoResponse, Response},
 };
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use futures_util::future::BoxFuture;
 use kenobi::{ContextBuilder, FinishedContext, PendingContext, SecurityInfo};
 use sspi::handle_sspi;
+#[cfg(windows)]
+use std::sync::RwLockReadGuard;
 use std::{
     convert::Infallible,
     fmt::Debug,
@@ -117,7 +119,27 @@ impl Authenticated {
     pub fn client(&self) -> Option<String> {
         self.call(|x| x.client_native_name().ok().map(|os| os.to_string_lossy().into_owned()))
     }
+    #[cfg(windows)]
+    pub fn impersonate_client(&self) -> ImpersonationGuard<'_> {
+        let read = self.0.read().unwrap();
+        ImpersonationGuard { read }
+    }
 }
+
+#[cfg(windows)]
+pub struct ImpersonationGuard<'ig> {
+    read: RwLockReadGuard<'ig, NegotiateState>,
+}
+impl ImpersonationGuard<'_> {
+    pub fn enter(&'_ self) -> kenobi::windows::impersonate::ImpersonationGuard<'_> {
+        if let NegotiateState::Authenticated(a) = self.read.deref() {
+            a.impersonate().unwrap()
+        } else {
+            unreachable!()
+        }
+    }
+}
+
 impl<S: Sync> FromRequestParts<S> for Authenticated {
     type Rejection = Infallible;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
