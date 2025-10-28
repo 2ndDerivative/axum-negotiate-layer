@@ -23,6 +23,10 @@ pub fn handle_sspi(context: impl Step, token: &str) -> StepResult {
             StepResult::ContinueWith(context, response)
         }
         Ok(StepSuccess::Finished(context, maybe_token)) => StepResult::Finished(context, maybe_token),
-        Err(_e) => StepResult::Error(unauthorized("authorization failed")),
+        Err(e) => {
+            #[cfg(feature = "tracing")]
+            tracing::error!("Authentication failed: {e:?}");
+            StepResult::Error(unauthorized("authorization failed"))
+        }
     }
 }

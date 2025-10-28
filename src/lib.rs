@@ -67,6 +67,7 @@ use kenobi::{ContextBuilder, FinishedContext, PendingContext, SecurityInfo};
 use sspi::handle_sspi;
 use std::{
     convert::Infallible,
+    ffi::OsString,
     fmt::Debug,
     ops::Deref,
     sync::{Arc, RwLock},
@@ -116,6 +117,9 @@ impl Authenticated {
     }
     pub fn client(&self) -> Option<String> {
         self.call(|x| x.client_native_name().ok().map(|os| os.to_string_lossy().into_owned()))
+    }
+    pub fn access_token(&self) -> Result<OsString, String> {
+        self.call(|x| x.access_token())
     }
 }
 impl<S: Sync> FromRequestParts<S> for Authenticated {
@@ -267,6 +271,7 @@ enum StepResult {
     Error(Response),
 }
 
+#[allow(clippy::result_large_err)]
 fn extract_token(headers: &HeaderMap) -> Result<&str, Response> {
     let Some(authorization) = headers.get(AUTHORIZATION) else {
         return Err(unauthorized("No Authorization given"));

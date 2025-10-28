@@ -17,12 +17,14 @@ base64 = "0.22.1"
 futures-util = { version = "0.3.31", default-features = false }
 tokio = { version = "1.42.0", default-features = false, optional = true, features = ["net"] }
 tower = { version = "0.5.2", default-features = false }
-kenobi = "0.1.1"
+kenobi = { path = "../kenobi", version = "0.1.1" }
+tracing = { version = "0.1.41", optional = true }
 
 [features]
 default = ["http1"]
 http1 = ["axum/http1", "tokio"]
 http2 = ["axum/http2", "tokio"]
+tracing = ["dep:tracing"]
 
 [dev-dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1"] }
