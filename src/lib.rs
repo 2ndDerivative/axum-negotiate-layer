@@ -53,15 +53,15 @@
 //! When getting the [`Authenticated`] object from the request extension or extracting it directly, the authentication can be guaranteed for this route, as this object can
 //! only be set by a middleware of this crate.
 use axum::{
-    extract::{connect_info::Connected, ConnectInfo, FromRequestParts, Request},
+    extract::{ConnectInfo, FromRequestParts, Request, connect_info::Connected},
     http::{
+        HeaderMap, HeaderValue, StatusCode,
         header::{AUTHORIZATION, CONNECTION, WWW_AUTHENTICATE},
         request::Parts,
-        HeaderMap, HeaderValue, StatusCode,
     },
     response::{IntoResponse, Response},
 };
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use futures_util::future::BoxFuture;
 use kenobi::{ContextBuilder, FinishedContext, PendingContext, SecurityInfo};
 use sspi::handle_sspi;
@@ -129,6 +129,7 @@ impl<S: Sync> FromRequestParts<S> for Authenticated {
         if auth.clone().read().unwrap().is_authenticated() {
             Ok(Authenticated(auth))
         } else {
+            tracing::error!(r#"NegotiateINfo not autorized. Probably extracted "Authenticated" outside of layer"#);
             panic!("NegotiateInfo was not authorized. you may have extracted `Authenticated` outside of the layer")
         }
     }
@@ -137,9 +138,12 @@ impl<S: Sync> FromRequestParts<S> for Authenticated {
 fn get_state_from_extension(parts: &Parts) -> Arc<RwLock<NegotiateState>> {
     match parts.extensions.get::<ConnectInfo<NegotiateInfo>>().cloned() {
         Some(ConnectInfo(NegotiateInfo { auth })) => auth,
-        None => panic!(
-            "No NegotiateInfo ConnectInfo was given. you may have forgotten to use into_make_service_with_connect_info"
-        ),
+        None => {
+            tracing::error!("Panicking due to no ConnectInfo given");
+            panic!(
+                "No NegotiateInfo ConnectInfo was given. you may have forgotten to use into_make_service_with_connect_info"
+            )
+        }
     }
 }
 /// Type that must be set via [`Router::into_make_service_with_connect_info`](axum::Router::into_make_service_with_connect_info).
