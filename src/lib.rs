@@ -62,14 +62,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{Engine, prelude::BASE64_STANDARD};
+use cross_krb5::{AcceptFlags, K5ServerCtx, PendingServerCtx, ServerCtx};
 use futures_util::future::BoxFuture;
-use kenobi::{ContextBuilder, FinishedContext, PendingContext, SecurityInfo};
 use sspi::handle_sspi;
 use std::{
     convert::Infallible,
-    ffi::OsString,
     fmt::Debug,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
     task::Poll,
 };
@@ -85,8 +84,8 @@ pub use listener::{HasNegotiateInfo, Negotiator, WithNegotiateInfo};
 enum NegotiateState {
     #[default]
     Unauthorized,
-    Pending(PendingContext),
-    Authenticated(FinishedContext),
+    Pending(PendingServerCtx),
+    Authenticated(ServerCtx),
 }
 impl NegotiateState {
     fn is_authenticated(&self) -> bool {
@@ -109,27 +108,29 @@ impl Debug for NegotiateState {
 #[derive(Debug, Clone)]
 pub struct Authenticated(Arc<RwLock<NegotiateState>>);
 impl Authenticated {
-    fn call<T>(&self, f: impl Fn(&FinishedContext) -> T) -> T {
-        match self.0.read().unwrap().deref() {
+    fn call<T>(&self, f: impl Fn(&mut ServerCtx) -> T) -> T {
+        let mut guard = self.0.write().unwrap();
+        match guard.deref_mut() {
             NegotiateState::Authenticated(x) => f(x),
             _ => unreachable!("Authenticated only exists after successful authentication"),
         }
     }
-    pub fn client(&self) -> Option<String> {
-        self.call(|x| x.client_native_name().ok().map(|os| os.to_string_lossy().into_owned()))
-    }
-    pub fn access_token(&self) -> Result<OsString, String> {
-        self.call(|x| x.access_token())
+    pub fn client(&mut self) -> Option<String> {
+        self.call(|x| x.client().ok())
     }
 }
 impl<S: Sync> FromRequestParts<S> for Authenticated {
     type Rejection = Infallible;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
         let auth = get_state_from_extension(parts);
-        if auth.clone().read().unwrap().is_authenticated() {
-            Ok(Authenticated(auth))
+        let Ok(au) = auth.read() else {
+            tracing::error!("Concurrency error, multiple threads accessing the same NegotiateInfo");
+            panic!()
+        };
+        if au.is_authenticated() {
+            Ok(Authenticated(auth.clone()))
         } else {
-            tracing::error!(r#"NegotiateINfo not autorized. Probably extracted "Authenticated" outside of layer"#);
+            tracing::error!(r#"NegotiateInfo not authorized. Probably extracted "Authenticated" outside of layer"#);
             panic!("NegotiateInfo was not authorized. you may have extracted `Authenticated` outside of the layer")
         }
     }
@@ -236,7 +237,7 @@ where
         let step_result = match std::mem::take(&mut *lock) {
             NegotiateState::Authenticated(_) => unreachable!(),
             NegotiateState::Pending(context) => handle_sspi(context, token),
-            NegotiateState::Unauthorized => match ContextBuilder::new(Some(&self.spn)) {
+            NegotiateState::Unauthorized => match ServerCtx::new(AcceptFlags::NEGOTIATE_TOKEN, Some(&self.spn)) {
                 Ok(context) => handle_sspi(context, token),
                 Err(_) => return Box::pin(async { Ok(failed_to_create_context()) }),
             },
@@ -270,8 +271,8 @@ fn to_negotiate_header(token_bytes: &[u8]) -> HeaderValue {
 }
 
 enum StepResult {
-    Finished(FinishedContext, Option<Box<[u8]>>),
-    ContinueWith(PendingContext, Response),
+    Finished(ServerCtx, Option<Box<[u8]>>),
+    ContinueWith(PendingServerCtx, Response),
     Error(Response),
 }
 

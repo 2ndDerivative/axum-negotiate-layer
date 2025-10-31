@@ -17,10 +17,10 @@ base64 = "0.22.1"
 futures-util = { version = "0.3.31", default-features = false }
 tokio = { version = "1.42.0", default-features = false, optional = true, features = ["net"] }
 tower = { version = "0.5.2", default-features = false }
-kenobi = { path = "../kenobi", version = "0.1.1" }
 tracing = { version = "0.1.41", optional = true }
 http = "1.3.1"
 axum-core = "0.5.2"
+cross-krb5 = { version = "0.4.2", registry = "heggemann", default-features = false }
 
 [features]
 default = ["http1"]
