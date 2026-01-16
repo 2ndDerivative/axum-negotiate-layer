@@ -12,7 +12,7 @@ license = "MIT"
 keywords = ["authentication", "kerberos", "ntlm", "gssapi", "axum"]
 
 [dependencies]
-axum = { version = "0.8", optional = true, default-features = false, features = ["tokio"] }
+axum = { version = "0.8", default-features = false, features = ["tokio"] }
 base64 = "0.22.1"
 futures-util = { version = "0.3.31", default-features = false }
 tokio = { version = "1.42.0", default-features = false, optional = true, features = ["net"] }
@@ -24,8 +24,8 @@ cross-krb5 = { version = "0.4.2", registry = "heggemann", default-features = fal
 
 [features]
 default = ["http1"]
-http1 = ["dep:axum", "axum/http1", "tokio"]
-http2 = ["dep:axum", "axum/http2", "tokio"]
+http1 = ["axum/http1", "tokio"]
+http2 = ["axum/http2", "tokio"]
 tracing = ["dep:tracing"]
 
 [dev-dependencies]
