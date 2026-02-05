@@ -174,19 +174,21 @@ impl NegotiateInfo {
 /// Also a [`ConnectInfo`] extension must have been set on the router.
 #[derive(Clone)]
 pub struct NegotiateLayer {
-    spn: String,
+    spn: Option<String>,
 }
 impl NegotiateLayer {
     #[must_use]
-    pub fn new(spn: &str) -> Self {
-        Self { spn: spn.to_owned() }
+    pub fn new(spn: Option<&str>) -> Self {
+        Self {
+            spn: spn.map(ToOwned::to_owned),
+        }
     }
 }
 impl<S> Layer<S> for NegotiateLayer {
     type Service = NegotiateMiddleware<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        NegotiateMiddleware::new(inner, &self.spn)
+        NegotiateMiddleware::new(inner, self.spn.as_deref())
     }
 }
 #[derive(Clone)]
@@ -198,12 +200,12 @@ impl<S> Layer<S> for NegotiateLayer {
 /// If there is no such connection information set, this middleware will panic.
 pub struct NegotiateMiddleware<S> {
     inner: S,
-    spn: String,
+    spn: Option<String>,
 }
 impl<S> NegotiateMiddleware<S> {
     #[must_use]
-    pub fn new(service: S, spn: &str) -> NegotiateMiddleware<S> {
-        let spn = spn.into();
+    pub fn new(service: S, spn: Option<&str>) -> NegotiateMiddleware<S> {
+        let spn = spn.map(ToOwned::to_owned);
         NegotiateMiddleware { inner: service, spn }
     }
 }
@@ -237,7 +239,7 @@ where
         let step_result = match std::mem::take(&mut *lock) {
             NegotiateState::Authenticated(_) => unreachable!(),
             NegotiateState::Pending(context) => handle_sspi(context, token),
-            NegotiateState::Unauthorized => match ServerCtx::new(AcceptFlags::NEGOTIATE_TOKEN, Some(&self.spn)) {
+            NegotiateState::Unauthorized => match ServerCtx::new(AcceptFlags::NEGOTIATE_TOKEN, self.spn.as_deref()) {
                 Ok(context) => handle_sspi(context, token),
                 Err(_) => return Box::pin(async { Ok(failed_to_create_context()) }),
             },
