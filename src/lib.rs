@@ -62,8 +62,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{Engine, prelude::BASE64_STANDARD};
-use cross_krb5::{AcceptFlags, K5ServerCtx, PendingServerCtx, ServerCtx};
 use futures_util::future::BoxFuture;
+use kenobi::{
+    channel_bindings::Channel,
+    cred::{Credentials, Inbound},
+    mech::Mechanism,
+    server::{PendingServerContext, ServerBuilder, ServerContext},
+};
 use sspi::handle_sspi;
 use std::{
     convert::Infallible,
@@ -84,8 +89,8 @@ pub use listener::{HasNegotiateInfo, Negotiator, WithNegotiateInfo};
 enum NegotiateState {
     #[default]
     Unauthorized,
-    Pending(PendingServerCtx),
-    Authenticated(ServerCtx),
+    Pending(PendingServerContext<Inbound>),
+    Authenticated(ServerContext<Inbound>),
 }
 impl NegotiateState {
     fn is_authenticated(&self) -> bool {
@@ -108,7 +113,7 @@ impl Debug for NegotiateState {
 #[derive(Debug, Clone)]
 pub struct Authenticated(Arc<RwLock<NegotiateState>>);
 impl Authenticated {
-    fn call<T>(&self, f: impl Fn(&mut ServerCtx) -> T) -> T {
+    fn call<T>(&self, f: impl Fn(&mut ServerContext<Inbound>) -> T) -> T {
         let mut guard = self.0.write().unwrap();
         match guard.deref_mut() {
             NegotiateState::Authenticated(x) => f(x),
@@ -116,30 +121,33 @@ impl Authenticated {
         }
     }
     pub fn client(&mut self) -> Option<String> {
-        self.call(|x| x.client().ok())
+        self.call(|x| Some(x.client_name().to_string()))
     }
 }
 impl<S: Sync> FromRequestParts<S> for Authenticated {
     type Rejection = Infallible;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        let auth = get_state_from_extension(parts);
+        let auth = get_state_from_extension(parts).0;
         let Ok(au) = auth.read() else {
+            #[cfg(feature = "tracing")]
             tracing::error!("Concurrency error, multiple threads accessing the same NegotiateInfo");
             panic!()
         };
         if au.is_authenticated() {
             Ok(Authenticated(auth.clone()))
         } else {
+            #[cfg(feature = "tracing")]
             tracing::error!(r#"NegotiateInfo not authorized. Probably extracted "Authenticated" outside of layer"#);
             panic!("NegotiateInfo was not authorized. you may have extracted `Authenticated` outside of the layer")
         }
     }
 }
 
-fn get_state_from_extension(parts: &Parts) -> Arc<RwLock<NegotiateState>> {
+fn get_state_from_extension(parts: &Parts) -> (Arc<RwLock<NegotiateState>>, Option<ChannelBindings>) {
     match parts.extensions.get::<ConnectInfo<NegotiateInfo>>().cloned() {
-        Some(ConnectInfo(NegotiateInfo { auth })) => auth,
+        Some(ConnectInfo(NegotiateInfo { auth, channel })) => (auth, channel),
         None => {
+            #[cfg(feature = "tracing")]
             tracing::error!("Panicking due to no ConnectInfo given");
             panic!(
                 "No NegotiateInfo ConnectInfo was given. you may have forgotten to use into_make_service_with_connect_info"
@@ -153,6 +161,7 @@ fn get_state_from_extension(parts: &Parts) -> Arc<RwLock<NegotiateState>> {
 #[derive(Clone, Debug, Default)]
 pub struct NegotiateInfo {
     auth: Arc<RwLock<NegotiateState>>,
+    channel: Option<ChannelBindings>,
 }
 impl Connected<NegotiateInfo> for NegotiateInfo {
     fn connect_info(value: NegotiateInfo) -> Self {
@@ -164,6 +173,25 @@ impl NegotiateInfo {
     /// You should probably only have to use this if you drive the IO loop yourself instead of using [`axum::serve()`]
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn with_channel(self, c: &impl Channel) -> Result<NegotiateInfo, impl std::error::Error> {
+        let channel = match c.channel_bindings() {
+            Err(e) => return Err(e),
+            Ok(bindings) => ChannelBindings(bindings.map(|ar| ar.into())),
+        };
+        Ok(NegotiateInfo {
+            auth: self.auth,
+            channel: Some(channel),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelBindings(Option<Arc<[u8]>>);
+impl Channel for ChannelBindings {
+    type Error = Infallible;
+    fn channel_bindings(&self) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(self.0.as_ref().map(|ar| ar.to_vec()))
     }
 }
 
@@ -222,7 +250,7 @@ where
     }
     fn call(&mut self, req: Request) -> Self::Future {
         let (mut parts, body) = req.into_parts();
-        let auth = get_state_from_extension(&parts);
+        let (auth, channel) = get_state_from_extension(&parts);
         // If anyone moves this .read() call around remember to not accidentally deadlock
         // with the write() call below
         if auth.read().unwrap().deref().is_authenticated() {
@@ -239,10 +267,32 @@ where
         let step_result = match std::mem::take(&mut *lock) {
             NegotiateState::Authenticated(_) => unreachable!(),
             NegotiateState::Pending(context) => handle_sspi(context, token),
-            NegotiateState::Unauthorized => match ServerCtx::new(AcceptFlags::NEGOTIATE_TOKEN, self.spn.as_deref()) {
-                Ok(context) => handle_sspi(context, token),
-                Err(_) => return Box::pin(async { Ok(failed_to_create_context()) }),
-            },
+            NegotiateState::Unauthorized => {
+                #[cfg(feature = "tracing")]
+                tracing::debug!(spn = self.spn.as_deref(), "Getting local SPNEGO credentials");
+                let cred = match Credentials::inbound(self.spn.as_deref(), Mechanism::Spnego) {
+                    Ok(cred) => cred,
+                    Err(e) => {
+                        #[cfg(feature = "tracing")]
+                        tracing::error!(error = ?e, "Failed to create credentials handle");
+                        let response = failed_to_create_context().into_response();
+                        return Box::pin(async move { Ok(response) });
+                    }
+                };
+                let builder = ServerBuilder::new_from_credentials(cred).with_mutual_auth();
+                let builder_with_bindings = if let Some(channel) = channel {
+                    #[cfg(feature = "tracing")]
+                    if channel.0.is_some() {
+                        tracing::trace!("Adding channel bindings");
+                    } else {
+                        tracing::warn!("channel bindings provided but were empty");
+                    }
+                    builder.bind_to_channel(&channel).expect("infallible")
+                } else {
+                    builder
+                };
+                handle_sspi(builder_with_bindings, token)
+            }
         };
         match step_result {
             StepResult::Finished(f, maybe_token) => {
@@ -273,8 +323,8 @@ fn to_negotiate_header(token_bytes: &[u8]) -> HeaderValue {
 }
 
 enum StepResult {
-    Finished(ServerCtx, Option<Box<[u8]>>),
-    ContinueWith(PendingServerCtx, Response),
+    Finished(ServerContext<Inbound>, Option<Box<[u8]>>),
+    ContinueWith(PendingServerContext<Inbound>, Response),
     Error(Response),
 }
 
