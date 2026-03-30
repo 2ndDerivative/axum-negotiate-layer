@@ -22,7 +22,7 @@ tower = { version = "0.5.2", default-features = false }
 tracing = { version = "0.1.41", optional = true }
 http = "1.3.1"
 axum-core = "0.5.2"
-kenobi = { version = "0.3", path = "../kenobi/crates/kenobi" }
+kenobi = { version = "0.4" }
 
 [features]
 default = ["http1"]
