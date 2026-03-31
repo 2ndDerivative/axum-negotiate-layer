@@ -48,9 +48,9 @@ pub fn handle_sspi(context: impl Step, token: &str) -> StepResult {
             tracing::info!("SPNEGO Finished: authenticated {}", context.client_name());
             StepResult::Finished(context, maybe_token)
         }
-        Err(e) => {
+        Err(_e) => {
             #[cfg(feature = "tracing")]
-            tracing::error!("Authentication failed: {e:?}");
+            tracing::error!("Authentication failed: {_e:?}");
             StepResult::Error(unauthorized("authorization failed"))
         }
     }

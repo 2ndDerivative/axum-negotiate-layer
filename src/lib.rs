@@ -272,9 +272,9 @@ where
                 tracing::debug!(spn = self.spn.as_deref(), "Getting local SPNEGO credentials");
                 let cred = match Credentials::inbound(self.spn.as_deref(), Mechanism::Spnego) {
                     Ok(cred) => cred,
-                    Err(e) => {
+                    Err(_e) => {
                         #[cfg(feature = "tracing")]
-                        tracing::error!(error = ?e, "Failed to create credentials handle");
+                        tracing::error!(error = ?_e, "Failed to create credentials handle");
                         let response = failed_to_create_context().into_response();
                         return Box::pin(async move { Ok(response) });
                     }
