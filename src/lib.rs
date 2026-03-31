@@ -5,7 +5,7 @@
 //! - [`NegotiateMiddleware`]: A [`tower::Service`] object that uses the [`NegotiateInfo`] attached to the connection to authenticate that connection
 //! - [`NegotiateLayer`]: A [`tower::Layer`] for the above mentioned service
 //! - A [`Authenticated`] request extension object to get information about authenticated clients (so far only the user identity)
-//! - An extension to the standard [`axum::serve::Listener`] (with feature `http1` or `http2`) to add negotiation info to every connection.
+//! - An extension to the standard [`axum::serve::Listener`] (with feature `http1`) to add negotiation info to every connection.
 //!   As SPNEGO is a non-http standard authentication method authenticating by connection, the negotiation info has to be included in every
 //!   connection given to axum, either via this struct or by manually providing it as a `ConnectInfo` extension when driving the routing loop yourself.
 //!
@@ -79,10 +79,10 @@ use std::{
 };
 use tower::{Layer, Service};
 
-#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "http1")]
 mod listener;
 mod sspi;
-#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "http1")]
 pub use listener::{HasNegotiateInfo, Negotiator, WithNegotiateInfo};
 
 #[derive(Default)]

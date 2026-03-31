@@ -27,7 +27,6 @@ kenobi = "0.4"
 [features]
 default = ["http1"]
 http1 = ["axum/http1", "tokio"]
-http2 = ["axum/http2", "tokio"]
 native-tls = ["kenobi/native-tls"]
 rustls = ["kenobi/rustls"]
 tracing = ["dep:tracing"]
