@@ -21,7 +21,7 @@
 //! async fn main() {
 //!     let router = Router::new()
 //!         .route("/", get(hello))
-//!         .layer(NegotiateLayer::new("HTTP/example.com"))
+//!         .layer(NegotiateLayer::new(Some("HTTP/example.com")))
 //!         .into_make_service_with_connect_info::<NegotiateInfo>();
 //!     let listener = TcpListener::bind("127.0.0.1:80").await.unwrap();
 //! }
