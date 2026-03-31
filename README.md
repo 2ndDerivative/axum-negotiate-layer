@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 async fn main() {
     let router = Router::new()
         .route("/", get(hello))
-        .layer(NegotiateLayer::new("HTTP/example.com"))
+        .layer(NegotiateLayer::new(Some("HTTP/example.com")))
         .into_make_service_with_connect_info::<NegotiateInfo>();
     let listener = TcpListener::bind("0.0.0.0:80").await.unwrap().with_negotiate_info();
     axum::serve(listener, router).await.unwrap();
