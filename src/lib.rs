@@ -296,14 +296,19 @@ where
         };
         match step_result {
             StepResult::Finished(f, maybe_token) => {
-                if let Some(token) = maybe_token {
-                    parts.headers.append(WWW_AUTHENTICATE, to_negotiate_header(&token));
-                }
                 parts.extensions.insert(Authenticated(auth.clone()));
                 let request = Request::from_parts(parts, body);
                 let next_future = self.inner.call(request);
                 *lock = NegotiateState::Authenticated(f);
-                Box::pin(next_future)
+                Box::pin(async move {
+                    let mut response = next_future.await?;
+                    if let Some(token) = maybe_token {
+                        response
+                            .headers_mut()
+                            .append(WWW_AUTHENTICATE, to_negotiate_header(&token));
+                    }
+                    Ok(response)
+                })
             }
             StepResult::ContinueWith(server_context, response) => {
                 *lock = NegotiateState::Pending(server_context);
