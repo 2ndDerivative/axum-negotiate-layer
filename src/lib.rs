@@ -346,7 +346,7 @@ fn extract_token(headers: &HeaderMap) -> Result<&str, Response> {
     if !prefix.eq_ignore_ascii_case("Negotiate") {
         return Err(unauthorized("Invalid Authorization Header"));
     }
-    Ok(base64)
+    Ok(base64.trim_start())
 }
 
 fn www_authenticate_map() -> HeaderMap {
