@@ -338,14 +338,16 @@ fn extract_token(headers: &HeaderMap) -> Result<&str, Response> {
     let Some(authorization) = headers.get(AUTHORIZATION) else {
         return Err(unauthorized("No Authorization given"));
     };
-    let Some(token) = authorization
+    let s = authorization
         .to_str()
-        .ok()
-        .and_then(|with_prefix| with_prefix.strip_prefix("Negotiate "))
-    else {
+        .map_err(|_| unauthorized("Invalid Authorization Header"))?;
+    let Some((prefix, base64)) = s.split_once(' ') else {
         return Err(unauthorized("Invalid Authorization Header"));
     };
-    Ok(token)
+    if !prefix.eq_ignore_ascii_case("Negotiate") {
+        return Err(unauthorized("Invalid Authorization Header"));
+    }
+    Ok(base64)
 }
 
 fn www_authenticate_map() -> HeaderMap {
