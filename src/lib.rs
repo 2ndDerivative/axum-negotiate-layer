@@ -14,7 +14,7 @@
 //!
 //! ```rust
 //! use axum::{routing::get, Extension, Router};
-//! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer, AddNegotiateInfo};
+//! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer, WithNegotiateInfo};
 //! use tokio::net::TcpListener;
 //!
 //! #[tokio::main]
