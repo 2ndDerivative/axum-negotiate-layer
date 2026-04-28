@@ -120,8 +120,8 @@ impl Authenticated {
             _ => unreachable!("Authenticated only exists after successful authentication"),
         }
     }
-    pub fn client(&mut self) -> Option<String> {
-        self.call(|x| Some(x.client_name().to_string()))
+    pub fn client(&mut self) -> String {
+        self.call(|x| x.client_name().to_string())
     }
 }
 impl<S: Sync> FromRequestParts<S> for Authenticated {
