@@ -37,7 +37,7 @@
 //!
 //! ```rust
 //! # use axum_negotiate_layer::Authenticated;
-//! async fn hello(a: Authenticated) -> String {
+//! async fn hello(mut a: Authenticated) -> String {
 //!     format!("Hello, {}!", a.client())
 //! }
 //! ```
@@ -46,7 +46,7 @@
 //! ```rust
 //! # use axum::Extension;
 //! # use axum_negotiate_layer::Authenticated;
-//! async fn hello(Extension(a): Extension<Authenticated>) -> String {
+//! async fn hello(Extension(mut a): Extension<Authenticated>) -> String {
 //!     format!("Hello, {}!", a.client())
 //! }
 //! ```
