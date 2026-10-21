@@ -19,12 +19,9 @@ async fn main() {
 }
 
 async fn hello(Extension(a): Extension<Authenticated>) -> String {
-    format!("Hello, {}!", a.client().unwrap_or("whoever".into()))
+    format!("Hello, {}!", a.client())
 }
 ```
-
-# Dependencies
-This crate uses the [cross-krb5](https://crates.io/crates/cross-krb5) crate for Kerberos/Negotiate authentication.
 
 # Contributing
 I will take contributions as they come and will try to support this crate further along, depending on the needs of submissions. Feel free to ask for features or fixes!

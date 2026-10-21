@@ -14,7 +14,7 @@
 //!
 //! ```rust
 //! use axum::{routing::get, Extension, Router};
-//! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer, AddNegotiateInfo};
+//! use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer, WithNegotiateInfo};
 //! use tokio::net::TcpListener;
 //!
 //! #[tokio::main]
@@ -24,6 +24,7 @@
 //!         .layer(NegotiateLayer::new(Some("HTTP/example.com")))
 //!         .into_make_service_with_connect_info::<NegotiateInfo>();
 //!     let listener = TcpListener::bind("127.0.0.1:80").await.unwrap();
+//!     axum::serve(listener.with_negotiate_info(), router).await.unwrap();
 //! }
 //! # async fn hello() {}
 //! ```
@@ -36,8 +37,8 @@
 //!
 //! ```rust
 //! # use axum_negotiate_layer::Authenticated;
-//! async fn hello(a: Authenticated) -> String {
-//!     format!("Hello, {}!", a.client().unwrap_or("whoever".to_owned()))
+//! async fn hello(mut a: Authenticated) -> String {
+//!     format!("Hello, {}!", a.client())
 //! }
 //! ```
 //!
@@ -45,8 +46,8 @@
 //! ```rust
 //! # use axum::Extension;
 //! # use axum_negotiate_layer::Authenticated;
-//! async fn hello(Extension(a): Extension<Authenticated>) -> String {
-//!     format!("Hello, {}!", a.client().unwrap_or("whoever".to_owned()))
+//! async fn hello(Extension(mut a): Extension<Authenticated>) -> String {
+//!     format!("Hello, {}!", a.client())
 //! }
 //! ```
 //!
@@ -74,7 +75,7 @@ use std::{
     convert::Infallible,
     fmt::Debug,
     ops::{Deref, DerefMut},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
     task::Poll,
 };
 use tower::{Layer, Service};
@@ -111,24 +112,24 @@ impl Debug for NegotiateState {
 // This struct can only be created by the middleware in this crate or cloned from an
 // existing one. Extracting it directly panics when the Layer has not been applied yet.
 #[derive(Debug, Clone)]
-pub struct Authenticated(Arc<RwLock<NegotiateState>>);
+pub struct Authenticated(Arc<Mutex<NegotiateState>>);
 impl Authenticated {
     fn call<T>(&self, f: impl Fn(&mut ServerContext<Inbound>) -> T) -> T {
-        let mut guard = self.0.write().unwrap();
+        let mut guard = self.0.lock().unwrap();
         match guard.deref_mut() {
             NegotiateState::Authenticated(x) => f(x),
             _ => unreachable!("Authenticated only exists after successful authentication"),
         }
     }
-    pub fn client(&mut self) -> Option<String> {
-        self.call(|x| Some(x.client_name().to_string()))
+    pub fn client(&mut self) -> String {
+        self.call(|x| x.client_name().to_string())
     }
 }
 impl<S: Sync> FromRequestParts<S> for Authenticated {
     type Rejection = Infallible;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
         let auth = get_state_from_extension(parts).0;
-        let Ok(au) = auth.read() else {
+        let Ok(au) = auth.lock() else {
             #[cfg(feature = "tracing")]
             tracing::error!("Concurrency error, multiple threads accessing the same NegotiateInfo");
             panic!()
@@ -143,7 +144,7 @@ impl<S: Sync> FromRequestParts<S> for Authenticated {
     }
 }
 
-fn get_state_from_extension(parts: &Parts) -> (Arc<RwLock<NegotiateState>>, Option<ChannelBindings>) {
+fn get_state_from_extension(parts: &Parts) -> (Arc<Mutex<NegotiateState>>, Option<ChannelBindings>) {
     match parts.extensions.get::<ConnectInfo<NegotiateInfo>>().cloned() {
         Some(ConnectInfo(NegotiateInfo { auth, channel })) => (auth, channel),
         None => {
@@ -160,7 +161,7 @@ fn get_state_from_extension(parts: &Parts) -> (Arc<RwLock<NegotiateState>>, Opti
 /// Without this, the [`NegotiateLayer`] will not work
 #[derive(Clone, Debug, Default)]
 pub struct NegotiateInfo {
-    auth: Arc<RwLock<NegotiateState>>,
+    auth: Arc<Mutex<NegotiateState>>,
     channel: Option<ChannelBindings>,
 }
 impl Connected<NegotiateInfo> for NegotiateInfo {
@@ -251,9 +252,8 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let (mut parts, body) = req.into_parts();
         let (auth, channel) = get_state_from_extension(&parts);
-        // If anyone moves this .read() call around remember to not accidentally deadlock
-        // with the write() call below
-        if auth.read().unwrap().deref().is_authenticated() {
+        let mut lock = auth.lock().unwrap();
+        if lock.deref().is_authenticated() {
             let request = Request::from_parts(parts, body);
             return Box::pin(self.inner.call(request));
         }
@@ -263,7 +263,6 @@ where
                 return Box::pin(async { Ok(response) });
             }
         };
-        let mut lock = auth.write().unwrap();
         let step_result = match std::mem::take(&mut *lock) {
             NegotiateState::Authenticated(_) => unreachable!(),
             NegotiateState::Pending(context) => handle_sspi(context, token),
@@ -338,14 +337,16 @@ fn extract_token(headers: &HeaderMap) -> Result<&str, Response> {
     let Some(authorization) = headers.get(AUTHORIZATION) else {
         return Err(unauthorized("No Authorization given"));
     };
-    let Some(token) = authorization
+    let s = authorization
         .to_str()
-        .ok()
-        .and_then(|with_prefix| with_prefix.strip_prefix("Negotiate "))
-    else {
+        .map_err(|_| unauthorized("Invalid Authorization Header"))?;
+    let Some((prefix, base64)) = s.split_once(' ') else {
         return Err(unauthorized("Invalid Authorization Header"));
     };
-    Ok(token)
+    if !prefix.eq_ignore_ascii_case("Negotiate") {
+        return Err(unauthorized("Invalid Authorization Header"));
+    }
+    Ok(base64.trim_start())
 }
 
 fn www_authenticate_map() -> HeaderMap {

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, net::Ipv4Addr};
+use std::net::Ipv4Addr;
 
 use axum::{Router, routing::get};
 use axum_negotiate_layer::{Authenticated, NegotiateInfo, NegotiateLayer};
@@ -32,6 +32,6 @@ async fn main() {
     }
 }
 
-async fn cheers(mut auth: Authenticated) -> Cow<'static, str> {
-    auth.client().map(Into::into).unwrap_or("UNKNOWN".into())
+async fn cheers(mut auth: Authenticated) -> String {
+    auth.client()
 }
