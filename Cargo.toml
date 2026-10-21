@@ -1,6 +1,6 @@
 [package]
 name = "axum-negotiate-layer"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 resolver = "2"
 authors = ["Niclas Klugmann <niclas@klugmann.de>"]
@@ -36,4 +36,4 @@ axum = { version = "0.8", default-features = false, features = ["http1"] }
 hyper = { version = "1.8.1", features = ["http1"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
- tracing-subscriber = "0.3.23"
+tracing-subscriber = "0.3.23"
