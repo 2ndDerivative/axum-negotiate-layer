@@ -175,9 +175,9 @@ impl NegotiateInfo {
         Self::default()
     }
     pub fn with_channel<C: Channel>(self, c: &C) -> Result<NegotiateInfo, C::Error> {
-        let channel = match c.channel_bindings() {
-            Err(e) => return Err(e),
-            Ok(bindings) => ChannelBindings(bindings.map(|ar| ar.into())),
+        let channel = {
+            let bindings = c.channel_bindings()?;
+            ChannelBindings(bindings.map(|ar| ar.into()))
         };
         Ok(NegotiateInfo {
             auth: self.auth,
